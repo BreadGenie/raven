@@ -50,15 +50,17 @@
    "search_index": 1
   },
   {
+   "encrypted": 1,
    "fieldname": "text",
    "fieldtype": "Long Text",
    "label": "Text"
   },
-  {
-   "fieldname": "json",
-   "fieldtype": "JSON",
-   "label": "JSON"
-  },
+   {
+    "encrypted": 1,
+    "fieldname": "json",
+    "fieldtype": "JSON",
+    "label": "JSON"
+   },
   {
    "fieldname": "file",
    "fieldtype": "Attach",
@@ -139,12 +141,13 @@
    "mandatory_depends_on": "eval: doc.is_bot_message == 1",
    "options": "Raven User"
   },
-  {
-   "fieldname": "content",
-   "fieldtype": "Long Text",
-   "label": "Content",
-   "read_only": 1
-  },
+   {
+    "encrypted": 1,
+    "fieldname": "content",
+    "fieldtype": "Long Text",
+    "label": "Content",
+    "read_only": 1
+   },
   {
    "default": "0",
    "fieldname": "is_edited",
@@ -212,7 +215,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-01-31 13:55:57.988161",
+ "modified": "2026-06-10 16:23:16.559003",
  "modified_by": "Administrator",
  "module": "Raven Messaging",
  "name": "Raven Message",

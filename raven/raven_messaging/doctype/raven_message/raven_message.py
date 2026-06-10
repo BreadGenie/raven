@@ -33,7 +33,6 @@ class RavenMessage(Document):
 
 	if TYPE_CHECKING:
 		from frappe.types import DF
-
 		from raven.raven_messaging.doctype.raven_mention.raven_mention import RavenMention
 
 		blurhash: DF.SmallText | None
@@ -187,12 +186,20 @@ class RavenMessage(Document):
 		If the message is a reply, update the replied_message_details field
 		"""
 		if self.is_reply and self.linked_message:
+			from frappe.utils.encryption import is_encrypted_placeholder
+
 			details = frappe.db.get_value(
 				"Raven Message",
 				self.linked_message,
 				["text", "content", "file", "message_type", "owner", "creation"],
 				as_dict=True,
 			)
+
+			if is_encrypted_placeholder(details.text):
+				linked_doc = frappe.get_doc("Raven Message", self.linked_message)
+				details.text = linked_doc.text
+				details.content = linked_doc.content
+
 			self.replied_message_details = {
 				"text": details.text,
 				"content": details.content,

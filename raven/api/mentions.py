@@ -1,6 +1,7 @@
 import frappe
 from frappe.query_builder import Order
 from frappe.query_builder.functions import Count
+from frappe.utils.encryption import decrypt_document_fields
 
 
 @frappe.whitelist(methods=["POST"])
@@ -60,6 +61,7 @@ def get_mentions(limit: int = 10, start: int = 0):
 	)
 
 	result = query.run(as_dict=True)
+	result = decrypt_document_fields(result, "Raven Message", skip_permission_check=True)
 
 	if start == 0:
 		frappe.db.set_value(

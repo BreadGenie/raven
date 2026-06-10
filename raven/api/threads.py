@@ -2,6 +2,7 @@ import frappe
 from frappe import _
 from frappe.query_builder import Order
 from frappe.query_builder.functions import Coalesce, Count
+from frappe.utils.encryption import decrypt_document_fields
 
 from raven.api.raven_channel import get_peer_user_id, is_channel_member
 from raven.utils import get_channel_members, get_thread_reply_count
@@ -99,6 +100,7 @@ def get_all_threads(
 
 	# return
 	threads = query.run(as_dict=True)
+	threads = decrypt_document_fields(threads, "Raven Message", skip_permission_check=True)
 
 	for thread in threads:
 		# Fetch the participants of the thread if it's not an AI thread or a DM thread
@@ -193,6 +195,7 @@ def get_other_threads(
 	query = query.orderby(thread_channel.last_message_timestamp, order=Order.desc)
 
 	threads = query.run(as_dict=True)
+	threads = decrypt_document_fields(threads, "Raven Message", skip_permission_check=True)
 
 	for thread in threads:
 		# Fetch the participants of the thread if it's not an AI thread or a DM thread

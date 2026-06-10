@@ -1,4 +1,5 @@
 import frappe
+from frappe.utils.encryption import decrypt_document_fields, search_blind_index
 from pypika import JoinType
 
 
@@ -111,7 +112,11 @@ def get_search_result(
 		if filter_type == "File":
 			query = query.where(message.file.like("/private/files/%" + search_text + "%"))
 		elif filter_type == "Message":
-			query = query.where(message.content.like("%" + search_text + "%"))
+			matching_docnames = search_blind_index("Raven Message", "content", search_text)
+			if matching_docnames:
+				query = query.where(message.name.isin(list(matching_docnames)))
+			else:
+				query = query.where(message.content.like("%" + search_text + "%"))
 		elif filter_type == "Channel":
 			query = query.where(channel.channel_name.like("%" + search_text + "%"))
 
@@ -150,4 +155,7 @@ def get_search_result(
 	if saved == "true":
 		query = query.where(message._liked_by.like(f"%{frappe.session.user}%"))
 
-	return query.limit(20).offset(0).run(as_dict=True)
+	result = query.limit(20).offset(0).run(as_dict=True)
+	if result and filter_type != "Channel":
+		result = decrypt_document_fields(result, "Raven Message", skip_permission_check=True)
+	return result

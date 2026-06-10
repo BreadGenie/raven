@@ -5,6 +5,7 @@ import frappe
 from frappe import _
 from frappe.query_builder import JoinType, Order
 from frappe.query_builder.functions import Coalesce, Count
+from frappe.utils.encryption import decrypt_document_fields
 
 from raven.api.raven_channel import create_direct_message_channel, get_peer_user_id
 from raven.utils import get_channel_member, is_channel_member, track_channel_visit
@@ -100,7 +101,7 @@ def get_messages(channel_id: str):
 		order_by="creation asc",
 	)
 
-	return messages
+	return decrypt_document_fields(messages, "Raven Message", skip_permission_check=True)
 
 
 @frappe.whitelist()
@@ -142,7 +143,7 @@ def get_pinned_messages(channel_id: str):
 	pinnedMessagesString = frappe.db.get_value("Raven Channel", channel_id, "pinned_messages_string")
 	pinnedMessages = pinnedMessagesString.split("\n") if pinnedMessagesString else []
 
-	return frappe.db.get_all(
+	messages = frappe.db.get_all(
 		"Raven Message",
 		filters={"name": ["in", pinnedMessages]},
 		fields=[
@@ -171,6 +172,8 @@ def get_pinned_messages(channel_id: str):
 		],
 		order_by="creation asc",
 	)
+
+	return decrypt_document_fields(messages, "Raven Message", skip_permission_check=True)
 
 
 @frappe.whitelist()
@@ -217,7 +220,7 @@ def get_saved_messages():
 
 	messages = query.run(as_dict=True)
 
-	return messages
+	return decrypt_document_fields(messages, "Raven Message", skip_permission_check=True)
 
 
 def parse_messages(messages):
@@ -360,6 +363,7 @@ def get_timeline_message_content(doctype: str, docname: str | int):
 		.where(message.link_document == docname)
 	)
 	data = query.run(as_dict=True)
+	data = decrypt_document_fields(data, "Raven Message", skip_permission_check=True)
 
 	timeline_contents = []
 	for log in data:

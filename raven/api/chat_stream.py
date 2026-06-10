@@ -3,6 +3,7 @@ import datetime
 import frappe
 from frappe import _
 from frappe.query_builder import Order
+from frappe.utils.encryption import decrypt_document_fields
 
 from raven.utils import track_channel_visit
 
@@ -81,7 +82,7 @@ def get_messages(channel_id: str, limit: int = 20, base_message: str | None = No
 
 	track_channel_visit(channel_id=channel_id, commit=True)
 	return {
-		"messages": messages,
+		"messages": decrypt_document_fields(messages, "Raven Message", skip_permission_check=True),
 		"has_old_messages": has_old_messages,
 		"has_new_messages": False,
 	}
@@ -195,7 +196,10 @@ def fetch_older_messages(
 		if len(older_message) > 0:
 			has_old_messages = True
 
-	return {"messages": messages, "has_old_messages": has_old_messages}
+	return {
+		"messages": decrypt_document_fields(messages, "Raven Message", skip_permission_check=True),
+		"has_old_messages": has_old_messages,
+	}
 
 
 @frappe.whitelist()
@@ -306,4 +310,7 @@ def fetch_newer_messages(
 
 	# The messages are in ascending order, so reverse them
 	messages.reverse()
-	return {"messages": messages, "has_new_messages": has_new_messages}
+	return {
+		"messages": decrypt_document_fields(messages, "Raven Message", skip_permission_check=True),
+		"has_new_messages": has_new_messages,
+	}
