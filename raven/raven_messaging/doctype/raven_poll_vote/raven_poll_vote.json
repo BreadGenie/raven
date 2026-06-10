@@ -18,14 +18,14 @@
    "fieldtype": "Section Break",
    "label": "User"
   },
-  {
-   "fieldname": "user_id",
-   "fieldtype": "Link",
-   "in_list_view": 1,
-   "label": "User",
-   "options": "Raven User",
-   "reqd": 1
-  },
+   {
+    "fieldname": "user_id",
+    "fieldtype": "Link",
+    "in_list_view": 1,
+    "label": "User",
+    "options": "Raven User",
+    "reqd": 1
+   },
   {
    "fieldname": "section_break_poll",
    "fieldtype": "Section Break",

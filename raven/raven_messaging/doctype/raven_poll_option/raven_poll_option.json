@@ -17,14 +17,15 @@
    "fieldtype": "Section Break",
    "label": "Poll Option"
   },
-  {
-   "fieldname": "option",
-   "fieldtype": "Small Text",
-   "in_list_view": 1,
-   "in_standard_filter": 1,
-   "label": "Option",
-   "reqd": 1
-  },
+   {
+    "fieldname": "option",
+    "fieldtype": "Small Text",
+    "in_list_view": 1,
+    "in_standard_filter": 1,
+    "encrypted": 1,
+    "label": "Option",
+    "reqd": 1
+   },
   {
    "fieldname": "votes",
    "fieldtype": "Int",

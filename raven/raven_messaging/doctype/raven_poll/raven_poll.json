@@ -24,13 +24,14 @@
    "fieldtype": "Section Break",
    "label": "Poll Question"
   },
-  {
-   "fieldname": "question",
-   "fieldtype": "Small Text",
-   "in_list_view": 1,
-   "label": "Question",
-   "reqd": 1
-  },
+   {
+    "fieldname": "question",
+    "fieldtype": "Small Text",
+    "in_list_view": 1,
+    "label": "Question",
+    "encrypted": 1,
+    "reqd": 1
+   },
   {
    "fieldname": "section_break_poll_options",
    "fieldtype": "Section Break",

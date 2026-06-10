@@ -15,13 +15,13 @@
    "fieldtype": "Section Break",
    "label": "Selection"
   },
-  {
-   "fieldname": "option",
-   "fieldtype": "Data",
-   "in_list_view": 1,
-   "label": "Option",
-   "reqd": 1
-  }
+   {
+    "fieldname": "option",
+    "fieldtype": "Data",
+    "in_list_view": 1,
+    "label": "Option",
+    "reqd": 1
+   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
