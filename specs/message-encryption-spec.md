@@ -71,85 +71,61 @@ doc_events = {
 - `System Manager` and `Raven Admin` without channel membership see `<<encrypted>>` in Desk.
 - Raven can optionally add a "break-glass" override that logs the action.
 
-## R5. Search
+## R5. Search — Blind Index
 
 ### R5.1 Problem
 
 Messages cannot be searched via SQL WHERE on encrypted fields. Raven currently relies on the `content` field (plaintext extract) for message search/previews.
 
-### R5.2 Solution: Sidecar Search Index
+### R5.2 Solution: Trigram Blind Index
 
-Build a dedicated search index that stores decrypted message content. Populated during `after_insert` / `on_update` (when plaintext is available in memory).
+Instead of a sidecar search index, Raven uses the framework's blind index feature (§9 in Frappe spec). This stores trigram SHA-256 hashes on each `Encryption Key` row, enabling substring search without exposing plaintext.
 
-```python
-# raven/raven_messaging/doctype/raven_message/raven_message.py
+**How it works:**
 
-def after_insert(self):
-    # ... existing logic ...
-    self._build_search_index()
-
-def on_update(self):
-    # ... existing logic ...
-    if self.has_value_changed("text"):
-        self._build_search_index()
-
-def _build_search_index(self):
-    """Populate the search index with decrypted content."""
-    content = self.content or frappe.utils.strip_html(self.text)
-    # Store in a search table
-    doc = frappe.get_doc({
-        "doctype": "Raven Message Search Index",
-        "message_id": self.name,
-        "channel_id": self.channel_id,
-        "content": content,
-        "owner": self.owner,
-        "creation": self.creation,
-    })
-    doc.db_insert()
-```
-
-### R5.3 Search Index DocType
-
-```json
-{
-  "name": "Raven Message Search Index",
-  "fields": [
-    { "fieldname": "message_id", "fieldtype": "Data", "reqd": 1 },
-    { "fieldname": "channel_id", "fieldtype": "Data", "reqd": 1, "search_index": 1 },
-    { "fieldname": "content", "fieldtype": "Long Text" },
-    { "fieldname": "owner", "fieldtype": "Data" },
-    { "fieldname": "creation", "fieldtype": "Datetime" }
-  ],
-  "indexes": [
-    { "columns": ["channel_id", "creation"] },
-    { "columns": ["message_id"], "unique": 1 }
-  ]
-}
-```
-
-### R5.4 Search Query
+During `store_encrypted_fields()`, the framework computes:
 
 ```python
-# raven/api/chat_stream.py
+padded = f"^{plaintext.lower()}$"   # pad with ^ and $
+trigrams = {padded[i:i+3] for i in range(len(padded) - 2)}
+blind_index = " ".join(sorted(sha256(t) for t in trigrams))
+```
 
+Each Encryption Key row stores `blind_index` — a space-separated list of hashed trigrams.
+
+**Search query:**
+
+```python
 def get_messages(channel_id, search_query=None, ...):
     if search_query:
-        # Search via index
-        message_ids = frappe.db.get_all(
-            "Raven Message Search Index",
-            filters={
-                "channel_id": channel_id,
-                "content": ("like", f"%{search_query}%"),
-            },
-            pluck="message_id",
+        # Step 1: Use blind index to find matching message names
+        message_ids = frappe.utils.encryption.search_blind_index(
+            "Raven Message", "content", search_query
         )
-        # Then fetch the actual messages (encrypted fields decrypted per permission)
-        return frappe.get_all("Raven Message",
-            filters={"name": ("in", message_ids)},
+        if not message_ids:
+            return []
+
+        # Step 2: Fetch + batch decrypt
+        rows = frappe.db.get_all(
+            "Raven Message",
+            filters={"name": ("in", list(message_ids)), "channel_id": channel_id},
+            fields=["*"],
             order_by="creation desc",
         )
-    # ... regular pagination flow ...
+        return frappe.utils.encryption.decrypt_document_fields(
+            rows, "Raven Message", skip_permission_check=True
+        )
 ```
+
+**Advantages over sidecar index:**
+- No separate DocType to maintain
+- No `after_insert`/`on_update` hooks needed — blind index is computed automatically during encryption
+- Always in sync with encrypted data (stored on the same row in `tabEncryption Key`)
+- Substring search support via trigrams (e.g., "ello" matches "hello world")
+
+**Limitations:**
+- Minimum 3-character query (single trigram)
+- False positives are theoretically possible but astronomically unlikely (SHA-256 collision)
 
 ## R6. Chat Stream API Changes
 

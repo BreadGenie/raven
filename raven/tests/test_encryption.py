@@ -1,4 +1,3 @@
-import hashlib
 import uuid
 
 import frappe
@@ -164,13 +163,21 @@ class TestRavenMessageEncryption(IntegrationTestCase):
             "blind_index",
         )
         self.assertIsNotNone(key)
-        for word in ["meeting", "agenda", "friday"]:
-            h = hashlib.sha256(word.encode()).hexdigest()
-            self.assertIn(h, key)
+        # Check trigram hashes — pick one representative trigram per word
+        import hashlib
+        for tri in ["mee", "age", "fri"]:
+            h = hashlib.sha256(tri.encode()).hexdigest()
+            self.assertIn(h, key, f"Missing trigram hash for '{tri}'")
 
     def test_search_blind_index_finds_message(self):
         msg_name = self._create_message("confidential project plan", self.test_user)
         results = search_blind_index("Raven Message", "content", "project")
+        self.assertIn(msg_name, results)
+
+    def test_search_blind_index_substring(self):
+        msg_name = self._create_message("confidential project plan", self.test_user)
+        # Substring of "project" should also match
+        results = search_blind_index("Raven Message", "content", "roj")
         self.assertIn(msg_name, results)
 
     def test_search_blind_index_multi_word(self):
@@ -180,7 +187,7 @@ class TestRavenMessageEncryption(IntegrationTestCase):
 
     def test_search_blind_index_no_match(self):
         msg_name = self._create_message("something else", self.test_user)
-        results = search_blind_index("Raven Message", "content", "nonexistent")
+        results = search_blind_index("Raven Message", "content", "zzz")
         self.assertNotIn(msg_name, results)
 
     def test_search_blind_index_does_not_leak_to_non_member(self):
