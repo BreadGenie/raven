@@ -1,5 +1,6 @@
 import frappe
 from frappe import _
+from frappe.utils.encryption import decrypt_document_fields, search_blind_index
 
 
 @frappe.whitelist(methods=["POST"])
@@ -14,7 +15,6 @@ def create_poll(
 	"""
 	Create a new poll in the Raven Poll doctype.
 	"""
-	# Check if the current user has access to the channel to create a poll.
 	if not frappe.has_permission(doctype="Raven Channel", doc=channel_id, ptype="read"):
 		frappe.throw(_("You do not have permission to access this channel"), frappe.PermissionError)
 
@@ -34,13 +34,11 @@ def create_poll(
 
 	poll.insert()
 
-	# Poll message content is the poll question and options separated by a newline. (This would help with the searchability of the poll)
 	poll_message_content = f"{question}\n"
 
 	for index, option in enumerate(options):
 		poll_message_content += f"{index + 1}. {option['option']}\n"
 
-	# Send a message to the channel with type "poll" and the poll_id.
 	message = frappe.get_doc(
 		{
 			"doctype": "Raven Message",
@@ -59,41 +57,42 @@ def create_poll(
 @frappe.whitelist()
 def get_poll(message_id: str):
 	"""
-	Get the poll data from the Raven Poll doctype.
-	(Including the poll options, the number of votes for each option and the total number of votes.)
+	Get the poll data including the user's current vote selections.
+	Uses blind index to look up the current user's votes (user_id is encrypted).
 	"""
-
-	# Check if the current user has access to the message.
 	if not frappe.has_permission(doctype="Raven Message", doc=message_id, ptype="read"):
 		frappe.throw(_("You do not have permission to access this message"), frappe.PermissionError)
 
 	poll_id = frappe.get_cached_value("Raven Message", message_id, "poll_id")
-
 	poll = frappe.get_cached_doc("Raven Poll", poll_id)
 
-	# Check if the current user has already voted in the poll, if so, return the poll with the user's vote from the child table vote_selection.
-	raven_poll_vote_selection = frappe.qb.DocType("Raven Poll Vote Selection")
-	raven_poll_vote = frappe.qb.DocType("Raven Poll Vote")
-
-	current_user_votes = (
-		frappe.qb.from_(raven_poll_vote_selection)
-		.join(raven_poll_vote)
-		.on(raven_poll_vote_selection.parent == raven_poll_vote.name)
-		.select(
-			raven_poll_vote_selection.option,
-			raven_poll_vote_selection.name,
+	# Look up current user's votes via blind index (user_id is encrypted)
+	vote_names = search_blind_index("Raven Poll Vote", "user_id", frappe.session.user)
+	if vote_names:
+		user_votes = frappe.db.get_all(
+			"Raven Poll Vote",
+			filters={"name": ["in", list(vote_names)], "poll_id": poll_id},
+			pluck="name",
 		)
-		.where(raven_poll_vote.poll_id == poll_id)
-		.where(raven_poll_vote.user_id == frappe.session.user)
-	).run(as_dict=True)
+		if user_votes:
+			selections = frappe.db.get_all(
+				"Raven Poll Vote Selection",
+				filters={"parent": ["in", user_votes]},
+				fields=["name", "option"],
+			)
+			current_user_votes = decrypt_document_fields(
+				selections, "Raven Poll Vote Selection", fields=["option"], skip_permission_check=True
+			)
+		else:
+			current_user_votes = []
+	else:
+		current_user_votes = []
 
 	return {"poll": poll, "current_user_votes": current_user_votes}
 
 
 @frappe.whitelist(methods=["POST"])
 def add_vote(message_id: str, option_id: str | list):
-
-	# Check if the current user has access to the message.
 	if not frappe.has_permission(doctype="Raven Message", doc=message_id, ptype="read"):
 		frappe.throw(_("You do not have permission to access this message"), frappe.PermissionError)
 
@@ -101,18 +100,14 @@ def add_vote(message_id: str, option_id: str | list):
 	is_poll_multi_choice = frappe.get_cached_value("Raven Poll", poll_id, "is_multi_choice")
 	is_disabled = frappe.get_cached_value("Raven Poll", poll_id, "is_disabled")
 
-	# Check if the poll is closed
 	if is_disabled:
 		frappe.throw(_("This poll is closed and no longer accepting votes"), frappe.PermissionError)
 
-	# Normalize option_id to list (backward compatible)
 	options = option_id if isinstance(option_id, list) else [option_id]
 
-	# For single-select, ensure only one option
 	if not is_poll_multi_choice and len(options) > 1:
 		frappe.throw(_("This poll only allows one selection."))
 
-	# Create ONE vote record with selections in child table
 	vote = frappe.get_doc(
 		{
 			"doctype": "Raven Poll Vote",
@@ -128,19 +123,25 @@ def add_vote(message_id: str, option_id: str | list):
 
 @frappe.whitelist(methods=["POST"])
 def retract_vote(poll_id: str):
-	# delete all votes by the user for the poll (this takes care of the case where the user has voted for multiple options in the same poll)
 	user = frappe.session.user
 
-	# Check if the poll is closed
 	is_disabled = frappe.get_cached_value("Raven Poll", poll_id, "is_disabled")
 	if is_disabled:
 		frappe.throw(
 			_("This poll is closed and you can no longer retract your vote"), frappe.PermissionError
 		)
 
-	votes = frappe.get_all(
-		"Raven Poll Vote", filters={"poll_id": poll_id, "user_id": user}, fields=["name"]
-	)
+	# Blind index lookup for encrypted user_id
+	vote_names = search_blind_index("Raven Poll Vote", "user_id", user)
+	if vote_names:
+		votes = frappe.get_all(
+			"Raven Poll Vote",
+			filters={"name": ["in", list(vote_names)], "poll_id": poll_id},
+			fields=["name"],
+		)
+	else:
+		votes = []
+
 	if not votes:
 		frappe.throw(_("You have not voted for any option in this poll."))
 	else:
@@ -150,8 +151,6 @@ def retract_vote(poll_id: str):
 
 @frappe.whitelist()
 def get_all_votes(poll_id: str):
-
-	# Check if the current user has access to the poll
 	if not frappe.has_permission(doctype="Raven Poll", doc=poll_id, ptype="read"):
 		frappe.throw(_("You do not have permission to access this poll"), frappe.PermissionError)
 
@@ -162,64 +161,71 @@ def get_all_votes(poll_id: str):
 			_("This poll is anonymous. You do not have permission to access the votes."),
 			frappe.PermissionError,
 		)
-	else:
-		# Get all votes for this poll from the child table vote_selection.
-		raven_poll_vote_selection = frappe.qb.DocType("Raven Poll Vote Selection")
-		raven_poll_vote = frappe.qb.DocType("Raven Poll Vote")
 
-		votes = (
-			frappe.qb.from_(raven_poll_vote_selection)
-			.join(raven_poll_vote)
-			.on(raven_poll_vote_selection.parent == raven_poll_vote.name)
-			.select(
-				raven_poll_vote_selection.option, raven_poll_vote_selection.name, raven_poll_vote.user_id
-			)
-			.where(raven_poll_vote.poll_id == poll_id)
-		).run(as_dict=True)
+	# Get all votes (encrypted fields return <<encrypted>>)
+	votes = frappe.db.get_all(
+		"Raven Poll Vote",
+		filters={"poll_id": poll_id},
+		fields=["name", "user_id"],
+	)
 
-		# Initialize results dictionary
-		results = {
-			option.name: {"users": [], "count": option.votes} for option in poll_doc.options if option.votes
-		}
+	if not votes:
+		return {}
 
-		# Process votes
-		for vote in votes:
-			option = vote["option"]
-			results[option]["users"].append(vote["user_id"])
+	# Batch-decrypt user_id
+	decrypted_votes = decrypt_document_fields(
+		votes, "Raven Poll Vote", fields=["user_id"], skip_permission_check=True
+	)
 
-		# Calculate total votes (use unique voters, not sum of all votes)
-		total_votes = poll_doc.total_votes or 0
+	# Get selections for these votes
+	vote_names = [v["name"] for v in decrypted_votes]
+	selections = frappe.db.get_all(
+		"Raven Poll Vote Selection",
+		filters={"parent": ["in", vote_names]},
+		fields=["name", "parent", "option"],
+	)
 
-		# Calculate percentages
-		for result in results.values():
-			if total_votes > 0:
-				result["percentage"] = (result["count"] / total_votes) * 100
-			else:
-				result["percentage"] = 0
+	# Batch-decrypt option
+	decrypted_selections = decrypt_document_fields(
+		selections, "Raven Poll Vote Selection", fields=["option"], skip_permission_check=True
+	)
 
-		return results
+	# Build user → option mapping
+	vote_map = {v["name"]: v["user_id"] for v in decrypted_votes}
+
+	results = {
+		option.name: {"users": [], "count": option.votes} for option in poll_doc.options if option.votes
+	}
+
+	for sel in decrypted_selections:
+		option = sel["option"]
+		uid = vote_map.get(sel["parent"], "?")
+		if option in results:
+			results[option]["users"].append(uid)
+
+	total_votes = poll_doc.total_votes or 0
+	for result in results.values():
+		if total_votes > 0:
+			result["percentage"] = (result["count"] / total_votes) * 100
+		else:
+			result["percentage"] = 0
+
+	return results
 
 
 @frappe.whitelist(methods=["POST"])
 def close_poll(poll_id: str):
-	"""
-	Close a poll by setting is_disabled to 1 (only poll owner can close the poll)
-	"""
 	poll_owner = frappe.get_cached_value("Raven Poll", poll_id, "owner")
 	is_poll_closed = frappe.get_cached_value("Raven Poll", poll_id, "is_disabled")
 
-	# Check if the current user is the owner of the poll
 	if poll_owner != frappe.session.user:
 		frappe.throw(_("Only the poll owner can close the poll"), frappe.PermissionError)
 
-	# Check if the poll is already closed
 	if is_poll_closed:
 		frappe.throw(_("This poll is already closed"), frappe.PermissionError)
 
-	# Close the poll
 	frappe.db.set_value("Raven Poll", poll_id, "is_disabled", 1)
 
-	# Event to update the poll
 	frappe.publish_realtime(
 		"doc_update",
 		{"doctype": "Raven Poll", "name": poll_id},
