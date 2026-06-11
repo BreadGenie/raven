@@ -60,6 +60,11 @@ class RavenPollVote(Document):
 	def after_delete(self):
 		update_poll_votes(self.poll_id)
 
+	def has_decrypt_permission(self, user=None) -> bool:
+		if not user:
+			user = frappe.session.user
+		return self.owner == user
+
 
 def update_poll_votes(poll_id):
 	"""
